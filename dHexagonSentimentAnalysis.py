@@ -8,20 +8,21 @@ from transformers import pipeline,RobertaTokenizer
 import whisper
 
 class result:
-    def __init__(self, coordinates,emotions,pos_percent,neg_percent,rating,language):
+    def __init__(self, coordinates,emotions,pos_percent,neg_percent,rating,language,duration):
         self.coordinates = coordinates
         self.emotions=emotions
         self.pos_percent=pos_percent
         self.neg_percent=neg_percent
         self.rating=rating
         self.language=language
+        self.duration=duration
 def process_audio(audio_path, chunk_duration=10):
 
     y, sr = librosa.load(audio_path, sr=None)
     chunk_size = int(chunk_duration * sr)
     chunks = [y[i:i+chunk_size] for i in range(0, len(y), chunk_size)]
     features = [librosa.feature.mfcc(y=chunk, sr=sr) for chunk in chunks]
-    return features
+    return features,len(y)
 
 def audio_to_text(audio_chunk):
     model = whisper.load_model("base")
@@ -96,13 +97,12 @@ def dHexagonAnalysis(audio_path):
     print(f"Detected language: {language_name}")
 
 
-    audio_features = process_audio(audio_path)
+    audio_features,duration = process_audio(audio_path)
     results = []
     mfccResults=[]
     textResults=[]
     emotions=[]
     i=0
-    tokenizer = RobertaTokenizer.from_pretrained("SamLowe/roberta-base-go_emotions")
 
     emotion_weights = {
         'neutral': 0.0,
@@ -175,7 +175,7 @@ def dHexagonAnalysis(audio_path):
     # print(f"emotion swings- {emotions}")
     # print(f"overall call rating -> {rating_var}")
 
-    model_result=result(normalized_combined_results,emotions,pos_percentage,neg_percentage,rating_var,language_name)
+    model_result=result(normalized_combined_results,emotions,pos_percentage,neg_percentage,rating_var,language_name,duration)
     return model_result
     # plot_mfcc(mfccResults)
     # plot_text(textResults)
