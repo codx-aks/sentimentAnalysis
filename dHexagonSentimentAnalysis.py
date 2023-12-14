@@ -6,6 +6,15 @@ from langcodes import Language
 import matplotlib.pyplot as plt
 from transformers import pipeline,RobertaTokenizer
 import whisper
+
+class result:
+    def __init__(self, coordinates,emotions,pos_percent,neg_percent,rating,language):
+        self.coordinates = coordinates
+        self.emotions=emotions
+        self.pos_percent=pos_percent
+        self.neg_percent=neg_percent
+        self.rating=rating
+        self.language=language
 def process_audio(audio_path, chunk_duration=10):
 
     y, sr = librosa.load(audio_path, sr=None)
@@ -25,7 +34,6 @@ def classify_mood(text,emotions):
     input=[text]
     model_outputs = classifier(input)
     emotions.append(model_outputs[0][0]['label'])
-    print(model_outputs[0][:5])
     return model_outputs[0][:5]
 
 def combine_results(audio_features, text_classification, emotion_weights,i):
@@ -140,7 +148,6 @@ def dHexagonAnalysis(audio_path):
         chunk.export(temp_filename, format="wav")
 
         text = audio_to_text(temp_filename)
-        print(text)
         text_classification = classify_mood(text,emotions)
         os.remove(temp_filename)
 
@@ -162,12 +169,14 @@ def dHexagonAnalysis(audio_path):
 
     rating_var = ((((1.0+pos_rating_var**2.0 - neg_rating_var**2.0)*12.5)**0.5))
 
-    print(f"emotion swings- {emotions}")
+    pos_percentage=pos_rating_var*5/(pos_rating_var-neg_rating_var)*50
+    neg_percentage=neg_rating_var*-5/(pos_rating_var-neg_rating_var)*50
 
-    print(f"positiveness rating -> {pos_rating_var*5/(pos_rating_var-neg_rating_var)}")
-    print(f"negativeness rating -> {neg_rating_var*-5/(pos_rating_var-neg_rating_var)}")
-    print(f"overall call rating -> {rating_var}")
+    # print(f"emotion swings- {emotions}")
+    # print(f"overall call rating -> {rating_var}")
 
-    plot_mfcc(mfccResults)
-    plot_text(textResults)
-    plot_results(normalized_combined_results)
+    model_result=result(normalized_combined_results,emotions,pos_percentage,neg_percentage,rating_var,language_name)
+    return model_result
+    # plot_mfcc(mfccResults)
+    # plot_text(textResults)
+    # plot_results(normalized_combined_results)
