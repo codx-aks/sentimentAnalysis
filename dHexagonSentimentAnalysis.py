@@ -171,5 +171,3 @@ def dHexagonAnalysis(audio_path):
     plot_mfcc(mfccResults)
     plot_text(textResults)
     plot_results(normalized_combined_results)
-
-dHexagonAnalysis('/Users/akshayv/Desktop/sihaudio.wav')
