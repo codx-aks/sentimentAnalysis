@@ -1,2 +1,3 @@
 import dHexagonSentimentAnalysis as dHex
-dHex.dHexagonAnalysis('/Users/akshayv/Desktop/sihaudio.wav')
+result=dHex.dHexagonAnalysis('/Users/akshayv/Desktop/sihaudio.wav')
+print(result.coordinates)
