@@ -81,7 +81,7 @@ def classify_audio(audio_file_path):
     return result,score
 def audio_to_text(audio_chunk):
     model = whisper.load_model("base")
-    result = model.transcribe(audio_chunk)
+    result = model.transcribe(audio_chunk,language="en")
     return result["text"]
 
 
