@@ -8,6 +8,7 @@ from transformers import pipeline
 import whisper
 from keras.models import model_from_json
 
+chunk_size=5
 class result:
     def __init__(self, coordinates,emotions,pos_percent,neg_percent,rating,language,duration,gender,transcript):
         self.coordinates = coordinates
@@ -19,7 +20,7 @@ class result:
         self.duration=duration
         self.gender=gender
         self.transcript=transcript
-def process_audio(audio_path, chunk_duration=10):
+def process_audio(audio_path, chunk_duration=chunk_size):
 
     y, sr = librosa.load(audio_path, sr=None)
     chunk_size = int(chunk_duration * sr)
@@ -186,8 +187,8 @@ def dHexagonAnalysis(audio_path):
         output_directory = "/Users/akshayv/Desktop/SIH2023"
         os.makedirs(output_directory, exist_ok=True)
 
-        start_time = i * 10000
-        end_time = (i + 1) * 10000
+        start_time = i * chunk_size*1000
+        end_time = (i + 1) * chunk_size*1000
         chunk = audio[start_time:end_time]
 
         temp_filename = f"{output_directory}/chunk_{i}.wav"
