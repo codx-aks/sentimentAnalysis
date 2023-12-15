@@ -1,3 +1,4 @@
+install dependencies mentioned in the requirements.txt
 Additional installations to be carried out :
 
 Ubuntu:
