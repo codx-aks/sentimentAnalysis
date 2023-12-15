@@ -8,7 +8,7 @@ from transformers import pipeline
 import whisper
 from keras.models import model_from_json
 
-chunk_size=5
+chunk_size=10
 class result:
     def __init__(self, coordinates,emotions,pos_percent,neg_percent,rating,language,duration,gender,transcript):
         self.coordinates = coordinates
@@ -20,7 +20,7 @@ class result:
         self.duration=duration
         self.gender=gender
         self.transcript=transcript
-def process_audio(audio_path, chunk_duration=chunk_size):
+def process_audio(audio_path, chunk_duration=10):
 
     y, sr = librosa.load(audio_path, sr=None)
     chunk_size = int(chunk_duration * sr)
@@ -34,6 +34,7 @@ def preprocess_audio(audio_path):
     sample_rate = np.array(sample_rate)
     mfccs = np.mean(librosa.feature.mfcc(y=X, sr=sample_rate, n_mfcc=13), axis=0)
     return np.expand_dims(mfccs, axis=0)
+
 
 def classify_audio(audio_file_path):
     model_architecture_path = 'model.json'
@@ -91,10 +92,10 @@ def classify_mood(text,emotions):
     emotions.append(model_outputs[0][0]['label'])
     return model_outputs[0][:5]
 
-def combine_results(speech_score, text_classification, emotion_weights,i):
+def combine_results(speech_score, text_classification, emotion_weights,i,l):
     weighted_scores = {}
     for emotion in text_classification:
-        if(i==len(text_classification)):
+        if(i==l-1):
             if(emotion['label']=='gratitude'):
                 weighted_scores[emotion['label']] = emotion['score'] * 0.4
             else:
@@ -187,8 +188,8 @@ def dHexagonAnalysis(audio_path):
         output_directory = "/Users/akshayv/Desktop/SIH2023"
         os.makedirs(output_directory, exist_ok=True)
 
-        start_time = i * chunk_size*1000
-        end_time = (i + 1) * chunk_size*1000
+        start_time = i * 10000
+        end_time = (i + 1) * 10000
         chunk = audio[start_time:end_time]
 
         temp_filename = f"{output_directory}/chunk_{i}.wav"
@@ -198,7 +199,7 @@ def dHexagonAnalysis(audio_path):
         text = audio_to_text(temp_filename)
         text_classification = classify_mood(text,emotions)
         os.remove(temp_filename)
-        combined_result,text_result = combine_results(speech_score, text_classification, emotion_weights,j)
+        combined_result,text_result = combine_results(speech_score, text_classification, emotion_weights,j,len(audio_features))
         textResults.append(text_result)
         results.append(combined_result)
         i=i+1
@@ -212,8 +213,6 @@ def dHexagonAnalysis(audio_path):
             pos_rating_var += (normalized_combined_results[k]-normalized_combined_results[k-1])
         elif (normalized_combined_results[k] < normalized_combined_results[k-1]):
             neg_rating_var += (normalized_combined_results[k] - normalized_combined_results[k - 1])
-
-
 
     if(len(normalized_combined_results)<=1):
         pos_percentage = 50 + textResults[0]*50
