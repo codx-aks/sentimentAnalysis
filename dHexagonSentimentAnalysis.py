@@ -4,12 +4,12 @@ import os
 from pydub import AudioSegment
 from langcodes import Language
 import matplotlib.pyplot as plt
-from transformers import pipeline,RobertaTokenizer
+from transformers import pipeline
 import whisper
 from keras.models import model_from_json
 
 class result:
-    def __init__(self, coordinates,emotions,pos_percent,neg_percent,rating,language,duration,gender):
+    def __init__(self, coordinates,emotions,pos_percent,neg_percent,rating,language,duration,gender,transcript):
         self.coordinates = coordinates
         self.emotions=emotions
         self.pos_percent=pos_percent
@@ -18,6 +18,7 @@ class result:
         self.language=language
         self.duration=duration
         self.gender=gender
+        self.transcript=transcript
 def process_audio(audio_path, chunk_duration=10):
 
     y, sr = librosa.load(audio_path, sr=None)
@@ -126,7 +127,10 @@ def plot_text(results):
 def normalize_data(data):
     min_val = min(data)
     max_val = max(data)
-    normalized_data = [(x - min_val) / (max_val - min_val) for x in data]
+    if(min_val!=max_val):
+        normalized_data = [(x - min_val) / (max_val - min_val) for x in data]
+    else:
+        normalized_data = [(x - 0) / (max_val - 0) for x in data]
     return normalized_data
 
 def dHexagonAnalysis(audio_path):
@@ -194,7 +198,6 @@ def dHexagonAnalysis(audio_path):
         text = audio_to_text(temp_filename)
         text_classification = classify_mood(text,emotions)
         os.remove(temp_filename)
-
         combined_result = combine_results(speech_score, text_classification, emotion_weights,j)
         mfccResults.append(np.mean(audio_chunk))
         textResults.append(combined_result-np.mean(audio_chunk))
@@ -211,19 +214,29 @@ def dHexagonAnalysis(audio_path):
         elif (normalized_combined_results[k] < normalized_combined_results[k-1]):
             neg_rating_var += (normalized_combined_results[k] - normalized_combined_results[k - 1])
 
-    rating_var = ((((1.0+pos_rating_var**2.0 - neg_rating_var**2.0)*12.5)**0.5))
 
-    pos_percentage=(pos_rating_var*5/(pos_rating_var-neg_rating_var))*20
-    neg_percentage=(neg_rating_var*-5/(pos_rating_var-neg_rating_var))*20
+
+    if(len(normalized_combined_results)<=1):
+        pos_percentage = 50 + normalized_combined_results[0]*50
+        neg_percentage = 100-pos_percentage
+        rating_var = (normalized_combined_results[0]+1)*2.5
+    else:
+        rating_var = ((((1.0 + pos_rating_var ** 2.0 - neg_rating_var ** 2.0) * 12.5) ** 0.5))
+        pos_percentage = (pos_rating_var * 5 / (pos_rating_var - neg_rating_var)) * 20
+        neg_percentage = (neg_rating_var * -5 / (pos_rating_var - neg_rating_var)) * 20
+
 
     # print(f"emotion swings- {emotions}")
     # print(f"overall call rating -> {rating_var}")
     # plot_text(textResults)
     # plot_results(normalized_combined_results)
+
     if(gen[0][0] == 'm'):
         gender = "male"
     else:
         gender = "female"
+
+    transcript=audio_to_text(audio_path)
     model_result = result(normalized_combined_results,
                           emotions,
                           pos_percentage,
@@ -231,7 +244,8 @@ def dHexagonAnalysis(audio_path):
                           rating_var,
                           language_name,
                           duration,
-                          gender)
+                          gender,
+                          transcript)
     return model_result
 
 

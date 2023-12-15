@@ -1,5 +1,5 @@
 import dHexagonSentimentAnalysis as dHex
-result=dHex.dHexagonAnalysis('/Users/akshayv/Desktop/sihaudio.wav')
+result=dHex.dHexagonAnalysis('/Users/akshayv/Desktop/sih10s.wav')
 print(f"graph coordinates->{result.coordinates}")
 print(f"caller emotions->{result.emotions}")
 print(f"call pos_percent->{result.pos_percent}")
@@ -8,3 +8,4 @@ print(f"call rating->{result.rating}")
 print(f"call language->{result.language}")
 print(f"call duration->{result.duration}")
 print(f"caller gender->{result.gender}")
+print(f"call transcript->{result.transcript}")
