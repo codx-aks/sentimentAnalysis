@@ -102,7 +102,7 @@ def combine_results(speech_score, text_classification, emotion_weights,i):
             weighted_scores[emotion['label']] = emotion['score'] * emotion_weights.get(emotion['label'], 0.0)
 
     combined_result = speech_score + 4*sum(weighted_scores.values())
-    return combined_result
+    return combined_result,sum(weighted_scores.values())
 
 def code_to_language_name(language_code):
     try:
@@ -146,7 +146,6 @@ def dHexagonAnalysis(audio_path):
 
     audio_features,duration = process_audio(audio_path)
     results = []
-    mfccResults=[]
     textResults=[]
     emotions=[]
     i=0
@@ -198,9 +197,8 @@ def dHexagonAnalysis(audio_path):
         text = audio_to_text(temp_filename)
         text_classification = classify_mood(text,emotions)
         os.remove(temp_filename)
-        combined_result = combine_results(speech_score, text_classification, emotion_weights,j)
-        mfccResults.append(np.mean(audio_chunk))
-        textResults.append(combined_result-np.mean(audio_chunk))
+        combined_result,text_result = combine_results(speech_score, text_classification, emotion_weights,j)
+        textResults.append(text_result)
         results.append(combined_result)
         i=i+1
 
@@ -217,9 +215,9 @@ def dHexagonAnalysis(audio_path):
 
 
     if(len(normalized_combined_results)<=1):
-        pos_percentage = 50 + normalized_combined_results[0]*50
+        pos_percentage = 50 + textResults[0]*50
         neg_percentage = 100-pos_percentage
-        rating_var = (normalized_combined_results[0]+1)*2.5
+        rating_var = (textResults[0]+1)*2.5
     else:
         rating_var = ((((1.0 + pos_rating_var ** 2.0 - neg_rating_var ** 2.0) * 12.5) ** 0.5))
         pos_percentage = (pos_rating_var * 5 / (pos_rating_var - neg_rating_var)) * 20
