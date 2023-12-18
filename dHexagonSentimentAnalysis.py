@@ -7,10 +7,13 @@ import matplotlib.pyplot as plt
 from transformers import pipeline
 import whisper
 from keras.models import model_from_json
+import tensorflow as tf
+from transformers import BertTokenizer, TFBertForSequenceClassification
 
 chunk_size=10
+
 class result:
-    def __init__(self, coordinates,emotions,pos_percent,neg_percent,rating,language,duration,gender,transcript):
+    def __init__(self, coordinates,emotions,pos_percent,neg_percent,rating,language,duration,gender,transcript,issue):
         self.coordinates = coordinates
         self.emotions=emotions
         self.pos_percent=pos_percent
@@ -20,6 +23,7 @@ class result:
         self.duration=duration
         self.gender=gender
         self.transcript=transcript
+        self.issue=issue
 def process_audio(audio_path, chunk_duration=10):
 
     y, sr = librosa.load(audio_path, sr=None)
@@ -79,18 +83,47 @@ def classify_audio(audio_file_path):
 
     result = [label[high1Index], label[high2index]]
     return result,score
+
+def issue_classify(text):
+    loaded_model = TFBertForSequenceClassification.from_pretrained('issue_classifier', num_labels=6)
+
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    class_list = ["Billing Issues", "Delivery Issues", "Product Availability", "Quality Issues", "Service Issues",
+                  "Technical Issues"]
+    new_texts = [text]
+    new_tokenized_inputs = tokenizer(new_texts, padding=True, truncation=True, return_tensors='tf')
+    predictions = loaded_model.predict(dict(new_tokenized_inputs))
+    probabilities = tf.nn.softmax(predictions.logits, axis=-1)
+
+    predicted_classes = tf.argmax(probabilities, axis=-1).numpy()
+    i = predicted_classes[0]
+    class_probabilities = probabilities.numpy()[0]
+
+    class_probability_dict = {class_label: class_probabilities[i] for i, class_label in enumerate(class_list)}
+    print("Class Probabilities:", class_probability_dict)
+
+    print("Predicted Classes:", class_list[i])
+    return class_list[i],class_probability_dict
+
+
+
 def audio_to_text(audio_chunk):
     model = whisper.load_model("base")
     result = model.transcribe(audio_chunk,language="en")
     return result["text"]
 
 
-def classify_mood(text,emotions):
+def classify_mood(text,emotions,emotion_weights):
     classifier = pipeline(task="text-classification", model="SamLowe/roberta-base-go_emotions", top_k=None)
     input=[text]
     model_outputs = classifier(input)
     emotions.append(model_outputs[0][0]['label'])
-    return model_outputs[0][:5]
+    service_issue=0;
+    if(emotion_weights[model_outputs[0][0]['label']]<=0):
+        issue,service_issue=issue_classify(text)
+        service_issue=service_issue['Service Issues']
+    return model_outputs[0][:5],service_issue
+
 
 def combine_results(speech_score, text_classification, emotion_weights,i,l):
     weighted_scores = {}
@@ -182,6 +215,7 @@ def dHexagonAnalysis(audio_path):
         'remorse': -0.7,
         'nervousness': -0.2
     }
+    service_issue_total=0
     for j, audio_chunk in enumerate(audio_features):
 
         audio = AudioSegment.from_wav(audio_path)
@@ -197,17 +231,29 @@ def dHexagonAnalysis(audio_path):
 
         gen,speech_score=classify_audio(temp_filename)
         text = audio_to_text(temp_filename)
-        text_classification = classify_mood(text,emotions)
+        text_classification,service_issue = classify_mood(text,emotions,emotion_weights)
+        service_issue_total+=service_issue
         os.remove(temp_filename)
         combined_result,text_result = combine_results(speech_score, text_classification, emotion_weights,j,len(audio_features))
         textResults.append(text_result)
         results.append(combined_result)
         i=i+1
 
+    service_issue_percent =  service_issue_total/i
+
     normalized_combined_results = normalize_data(results)
     pos_rating_var = 0
     neg_rating_var = 0
-
+    transcript = audio_to_text(audio_path)
+    print("aduthu")
+    issue,issue_dict=issue_classify(transcript)
+    issue_list=[]
+    print(issue_dict)
+    for a in issue_dict.keys():
+        if(issue_dict[a]>0.07):
+            issue_list.append(a)
+    if(len(issue_list)>=4):
+        issue_list=["issue's unidentifiable , might be spam call"]
     for k in range(1, len(normalized_combined_results)):
         if (normalized_combined_results[k] > normalized_combined_results[k-1] ) :
             pos_rating_var += (normalized_combined_results[k]-normalized_combined_results[k-1])
@@ -223,18 +269,20 @@ def dHexagonAnalysis(audio_path):
         pos_percentage = (pos_rating_var * 5 / (pos_rating_var - neg_rating_var)) * 20
         neg_percentage = (neg_rating_var * -5 / (pos_rating_var - neg_rating_var)) * 20
 
-
+    print((1-(service_issue_percent)/3))
+    rating_var*= (1-(service_issue_percent)/3)
     # print(f"emotion swings- {emotions}")
     # print(f"overall call rating -> {rating_var}")
     # plot_text(textResults)
     # plot_results(normalized_combined_results)
+    if(rating_var<=2):
+        rating_var+=2
 
     if(gen[0][0] == 'm'):
         gender = "male"
     else:
         gender = "female"
 
-    transcript=audio_to_text(audio_path)
     model_result = result(normalized_combined_results,
                           emotions,
                           pos_percentage,
@@ -243,7 +291,9 @@ def dHexagonAnalysis(audio_path):
                           language_name,
                           duration,
                           gender,
-                          transcript)
+                          transcript,
+                          issue_list)
     return model_result
+
 
 
