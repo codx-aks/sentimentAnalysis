@@ -174,9 +174,9 @@ def issue_classify(text):
     class_probabilities = probabilities.numpy()[0]
 
     class_probability_dict = {class_label: class_probabilities[i] for i, class_label in enumerate(class_list)}
-    print("Class Probabilities:", class_probability_dict)
-
-    print("Predicted Classes:", class_list[i])
+    # print("Class Probabilities:", class_probability_dict)
+    #
+    # print("Predicted Classes:", class_list[i])
     return class_list[i],class_probability_dict
 
 
@@ -187,7 +187,7 @@ def audio_to_text(audio_chunk):
     return result["text"]
 
 
-def classify_mood(text,emotions,emotion_weights,i,potential_issues):
+def classify_mood(text,emotions,emotion_weights,):
     classifier = pipeline(task="text-classification", model="SamLowe/roberta-base-go_emotions", top_k=None)
     input=[text]
     model_outputs = classifier(input)
@@ -203,9 +203,6 @@ def classify_mood(text,emotions,emotion_weights,i,potential_issues):
     if(emotion_weights[model_outputs[0][0]['label']]<=0):
         issue,service_issue=issue_classify(text)
         service_issue=service_issue['Service Issues']
-        if (i < 2):
-            potential_issues.append(issue)
-
 
     return model_outputs[0][:5],service_issue
 
@@ -221,7 +218,7 @@ def combine_results(speech_score, text_classification, emotion_weights,i,l):
         else:
             weighted_scores[emotion['label']] = emotion['score'] * emotion_weights.get(emotion['label'], 0.0)
 
-    combined_result = speech_score + 2*sum(weighted_scores.values())
+    combined_result = speech_score + 2.5*sum(weighted_scores.values())
     return combined_result,sum(weighted_scores.values())
 
 def code_to_language_name(language_code):
@@ -319,7 +316,7 @@ def dHexagonAnalysis(audio_path):
         speech_score,emo=classify_audio(temp_filename)
         emotions_audio.append(emo)
         text = audio_to_text(temp_filename)
-        text_classification,service_issue = classify_mood(text,emotions,emotion_weights,i,potential_issues)
+        text_classification,service_issue = classify_mood(text,emotions,emotion_weights)
         service_issue_total+=service_issue
         os.remove(temp_filename)
         combined_result,text_result = combine_results(speech_score, text_classification, emotion_weights,j,len(audio_features))
@@ -327,22 +324,50 @@ def dHexagonAnalysis(audio_path):
         results.append(combined_result)
         i=i+1
 
-    service_issue_percent =  service_issue_total/i
+    service_issue_percent = service_issue_total/i
 
     normalized_combined_results = normalize_data(results)
     pos_rating_var = 0
     neg_rating_var = 0
+    audio = AudioSegment.from_wav(audio_path)
+    output_directory = "/Users/akshayv/Desktop/SIH2023"
+    os.makedirs(output_directory, exist_ok=True)
+    if(duration>20):
+        start_time = 4000
+        end_time = 18000
+    else:
+        start_time = 1000
+        end_time = 13000
+    chunk = audio[start_time:end_time]
+
+    temp_filename = f"{output_directory}/chunk_{i}.wav"
+    chunk.export(temp_filename, format="wav")
+    text = audio_to_text(temp_filename)
+    issue_first20, issue_dict_first20 = issue_classify(text)
+    os.remove(temp_filename)
+    potential_issues.append(issue_first20)
     transcript = audio_to_text(audio_path)
-    print("aduthu")
-    issue,issue_dict=issue_classify(transcript)
-    issue_list=[]
-    for a in issue_dict.keys():
-        if(issue_dict[a]>0.07):
-            issue_list.append(a)
-            potential_issues.append(a)
-    if(len(issue_list)>=4):
-        potential_issues=potential_issues[0:2]
-        issue_list=["issue's unidentifiable,might be no issues call or a spam call"]
+    # from transformers import pipeline
+    # summarizer = pipeline("summarization", model="Falconsai/text_summarization")
+    # summary=summarizer(transcript, max_length=45, min_length=7, do_sample=False)
+    # print(f"summary:{summary}")
+    # print("aduthu")
+    # issue,issue_dict=issue_classify(summary[0]['summary_text'])
+    # issue_list = []
+    # for a in issue_dict.keys():
+    #     if(issue_dict[a]>0.02):
+    #         issue_list.append(a)
+    #         potential_issues.append(a)
+    # if(len(issue_list)>=4):
+    #     potential_issues=potential_issues[0:4]
+    # from transformers import pipeline, BartTokenizer, BartForConditionalGeneration
+    # tokenizer = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
+    # model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
+    # inputs = tokenizer.encode("summarize: " + transcript, return_tensors="pt", max_length=1024, truncation=True)
+    # summary_ids = model.generate(inputs, max_length=50, min_length=10, length_penalty=2.0, num_beams=4,
+    #                              early_stopping=True)
+    # summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+    # print(summary)
     for k in range(1, len(normalized_combined_results)):
         if (normalized_combined_results[k] > normalized_combined_results[k-1] ) :
             pos_rating_var += (normalized_combined_results[k]-normalized_combined_results[k-1])
@@ -364,9 +389,8 @@ def dHexagonAnalysis(audio_path):
     # print(f"overall call rating -> {rating_var}")
     # plot_text(textResults)
     # plot_results(normalized_combined_results)
-    if(rating_var<=1):
-        rating_var+=2
-
+    if(rating_var<1):
+        rating_var+=1
 
     model_result = result(normalized_combined_results,
                           emotions,
@@ -379,4 +403,6 @@ def dHexagonAnalysis(audio_path):
                           potential_issues,
                           emotions_audio)
     return model_result
+
+
 
