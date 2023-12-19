@@ -8,12 +8,25 @@ from transformers import pipeline
 import whisper
 from keras.models import model_from_json
 import tensorflow as tf
+from keras.models import load_model
+import pandas as pd
+import numpy as np
+import sys
+import librosa
+import librosa.display
+import joblib
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from transformers import BertTokenizer, TFBertForSequenceClassification
+import warnings
+
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 chunk_size=10
 
 class result:
-    def __init__(self, coordinates,emotions,pos_percent,neg_percent,rating,language,duration,gender,transcript,issue):
+    def __init__(self, coordinates,emotions,pos_percent,neg_percent,rating,language,duration,transcript,issue,emotions_audio):
         self.coordinates = coordinates
         self.emotions=emotions
         self.pos_percent=pos_percent
@@ -21,9 +34,9 @@ class result:
         self.rating=rating
         self.language=language
         self.duration=duration
-        self.gender=gender
         self.transcript=transcript
         self.issue=issue
+        self.emotions_audio=emotions_audio
 def process_audio(audio_path, chunk_duration=10):
 
     y, sr = librosa.load(audio_path, sr=None)
@@ -41,48 +54,109 @@ def preprocess_audio(audio_path):
 
 
 def classify_audio(audio_file_path):
-    model_architecture_path = 'model.json'
-    json_file = open(model_architecture_path, 'r')
-    loaded_model_json = json_file.read()
-    json_file.close()
+    data_path=audio_file_path
+    model = load_model("recog_speechhybrid.h5")
 
-    model_weights_path = 'Emotion_Voice_Detection_Model.h5'
-    loaded_model = model_from_json(loaded_model_json)
-    loaded_model.load_weights(model_weights_path)
+    def noise(data):
+        noise_amp = 0.035 * np.random.uniform() * np.amax(data)
+        data = data + noise_amp * np.random.normal(size=data.shape[0])
+        return data
 
-    input_data = preprocess_audio(audio_file_path)
+    def stretch(data, rate=0.8):
+        return librosa.effects.time_stretch(data, rate=rate)
 
-    predictions = loaded_model.predict(input_data)
-    high1 = max(predictions[0])
-    high1Index = 0
-    high2index = 0
-    high2 = 0
-    weights = [-0.8, 0.2, -0.3, 1.0, -0.6, -0.8, 0.2, -0.3, 1.0, -0.6]
-    score = 0
-    for i in range(0, len(predictions[0])):
+    def shift(data):
+        shift_range = int(np.random.uniform(low=-5, high=5) * 1000)
+        return np.roll(data, shift_range)
 
-        score += weights[i] * float(predictions[0][i])
+    def pitch(data, sampling_rate, pitch_factor=0.7):
+        return librosa.effects.pitch_shift(data, sr=sampling_rate, n_steps=0.7)
 
-        if (predictions[0][i] < high1 and predictions[0][i] > high2):
-            high2 = predictions[0][i]
-            high2index = i
+    path = data_path
+    data, sample_rate = librosa.load(path)
 
-        elif (predictions[0][i] == high1):
-            high1Index = i
+    def extract_features(data):
+        # ZCR
+        result = np.array([])
+        zcr = np.mean(librosa.feature.zero_crossing_rate(y=data).T, axis=0)
+        result = np.hstack((result, zcr))  # stacking horizontally
 
-    label = ["female_angry",
-             "female_calm",
-             "female_fearful",
-             "female_happy",
-             "female_sad",
-             "male_angry",
-             "male_calm",
-             "male_fearful",
-             "male_happy",
-             "male_sad"]
+        # Chroma_stft
+        stft = np.abs(librosa.stft(data))
+        chroma_stft = np.mean(librosa.feature.chroma_stft(S=stft, sr=sample_rate).T, axis=0)
+        result = np.hstack((result, chroma_stft))  # stacking horizontally
 
-    result = [label[high1Index], label[high2index]]
-    return result,score
+        # MFCC
+        mfcc = np.mean(librosa.feature.mfcc(y=data, sr=sample_rate).T, axis=0)
+        result = np.hstack((result, mfcc))  # stacking horizontally
+
+        # Root Mean Square Value
+        rms = np.mean(librosa.feature.rms(y=data).T, axis=0)
+        result = np.hstack((result, rms))  # stacking horizontally
+
+        # MelSpectogram
+        mel = np.mean(librosa.feature.melspectrogram(y=data, sr=sample_rate).T, axis=0)
+        result = np.hstack((result, mel))  # stacking horizontally
+
+        return result
+
+    def get_features(path):
+        # duration and offset are used to take care of the no audio in start and the ending of each audio files as seen above.
+        data, sample_rate = librosa.load(path, duration=2.5, offset=0.6)
+
+        # without augmentation
+        res1 = extract_features(data)
+        result = np.array(res1)
+
+        # data with noise
+        noise_data = noise(data)
+        res2 = extract_features(noise_data)
+        result = np.vstack((result, res2))
+
+        # data with stretching and pitching
+        new_data = stretch(data)
+        data_stretch_pitch = pitch(new_data, sample_rate)
+        res3 = extract_features(data_stretch_pitch)
+        result = np.vstack((result, res3))
+
+        return result
+
+    X, Y = [], []
+    feature = get_features(path)
+    for ele in feature:
+        X.append(ele)
+
+    Features = pd.DataFrame(X)
+    Features.to_csv('features.csv', index=False)
+
+    X = Features.iloc[:, :-1].values
+    loaded_scaler = joblib.load('scalerhybrid.pkl')
+    X = loaded_scaler.fit_transform(X)
+    X = np.expand_dims(X, axis=2)
+    padded_X = np.pad(X, ((0, 0), (0, 1), (0, 0)), mode='constant', constant_values=0)
+
+    pred_test = model.predict(padded_X)
+    label_list=["neutral","calm","happy","sad","angry","fear","disgust","surprise"]
+    weight_list=[0,0.4,0.7,-0.7,-0.9,-0.7,-0.6,0.3]
+    result=pred_test[0]
+    score=0
+    maxi_index=1;
+    emotion= {'neutral':result[0]}
+    for i in range(0,len(result)):
+        score+=weight_list[i]*result[i]
+        if(i==0):
+            continue
+        else:
+            if(result[i]>result[maxi_index]):
+                maxi_index=i
+
+    if(result[0]>=result[maxi_index]):
+        if(result[maxi_index]>0.15):
+            emotion= {label_list[maxi_index]:result[maxi_index]}
+    else:
+        emotion = {label_list[maxi_index]: result[maxi_index]}
+
+    return score,emotion
 
 def issue_classify(text):
     loaded_model = TFBertForSequenceClassification.from_pretrained('issue_classifier', num_labels=6)
@@ -113,15 +187,26 @@ def audio_to_text(audio_chunk):
     return result["text"]
 
 
-def classify_mood(text,emotions,emotion_weights):
+def classify_mood(text,emotions,emotion_weights,i,potential_issues):
     classifier = pipeline(task="text-classification", model="SamLowe/roberta-base-go_emotions", top_k=None)
     input=[text]
     model_outputs = classifier(input)
-    emotions.append(model_outputs[0][0]['label'])
-    service_issue=0;
+    if(model_outputs[0][0]['label']!="neutral"):
+        emotions.append({model_outputs[0][0]['label']: model_outputs[0][0]['score']})
+    else:
+        if(model_outputs[0][1]['score']>=0.15):
+            emotions.append({model_outputs[0][1]['label']: model_outputs[0][1]['score']})
+        else:
+            emotions.append({model_outputs[0][0]['label']: model_outputs[0][0]['score']})
+
+    service_issue=0
     if(emotion_weights[model_outputs[0][0]['label']]<=0):
         issue,service_issue=issue_classify(text)
         service_issue=service_issue['Service Issues']
+        if (i < 2):
+            potential_issues.append(issue)
+
+
     return model_outputs[0][:5],service_issue
 
 
@@ -136,7 +221,7 @@ def combine_results(speech_score, text_classification, emotion_weights,i,l):
         else:
             weighted_scores[emotion['label']] = emotion['score'] * emotion_weights.get(emotion['label'], 0.0)
 
-    combined_result = speech_score + 4*sum(weighted_scores.values())
+    combined_result = speech_score + 2*sum(weighted_scores.values())
     return combined_result,sum(weighted_scores.values())
 
 def code_to_language_name(language_code):
@@ -183,6 +268,8 @@ def dHexagonAnalysis(audio_path):
     results = []
     textResults=[]
     emotions=[]
+    emotions_audio=[]
+    potential_issues = []
     i=0
 
     emotion_weights = {
@@ -202,7 +289,7 @@ def dHexagonAnalysis(audio_path):
         'amusement': 0.3,
         'sadness': -0.8,
         'optimism': 0.4,
-        'curiosity': 0.1,
+        'curiosity': 0.0,
         'fear': -0.9,
         'desire': 0.7,
         'surprise': 0.1,
@@ -229,9 +316,10 @@ def dHexagonAnalysis(audio_path):
         temp_filename = f"{output_directory}/chunk_{i}.wav"
         chunk.export(temp_filename, format="wav")
 
-        gen,speech_score=classify_audio(temp_filename)
+        speech_score,emo=classify_audio(temp_filename)
+        emotions_audio.append(emo)
         text = audio_to_text(temp_filename)
-        text_classification,service_issue = classify_mood(text,emotions,emotion_weights)
+        text_classification,service_issue = classify_mood(text,emotions,emotion_weights,i,potential_issues)
         service_issue_total+=service_issue
         os.remove(temp_filename)
         combined_result,text_result = combine_results(speech_score, text_classification, emotion_weights,j,len(audio_features))
@@ -248,12 +336,13 @@ def dHexagonAnalysis(audio_path):
     print("aduthu")
     issue,issue_dict=issue_classify(transcript)
     issue_list=[]
-    print(issue_dict)
     for a in issue_dict.keys():
         if(issue_dict[a]>0.07):
             issue_list.append(a)
+            potential_issues.append(a)
     if(len(issue_list)>=4):
-        issue_list=["issue's unidentifiable , might be spam call"]
+        potential_issues=potential_issues[0:2]
+        issue_list=["issue's unidentifiable,might be no issues call or a spam call"]
     for k in range(1, len(normalized_combined_results)):
         if (normalized_combined_results[k] > normalized_combined_results[k-1] ) :
             pos_rating_var += (normalized_combined_results[k]-normalized_combined_results[k-1])
@@ -275,13 +364,9 @@ def dHexagonAnalysis(audio_path):
     # print(f"overall call rating -> {rating_var}")
     # plot_text(textResults)
     # plot_results(normalized_combined_results)
-    if(rating_var<=2):
+    if(rating_var<=1):
         rating_var+=2
 
-    if(gen[0][0] == 'm'):
-        gender = "male"
-    else:
-        gender = "female"
 
     model_result = result(normalized_combined_results,
                           emotions,
@@ -290,10 +375,8 @@ def dHexagonAnalysis(audio_path):
                           rating_var,
                           language_name,
                           duration,
-                          gender,
                           transcript,
-                          issue_list)
+                          potential_issues,
+                          emotions_audio)
     return model_result
-
-
 
