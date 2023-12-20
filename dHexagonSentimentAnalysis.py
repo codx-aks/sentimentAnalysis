@@ -210,15 +210,16 @@ def classify_mood(text,emotions,emotion_weights,):
 def combine_results(speech_score, text_classification, emotion_weights,i,l):
     weighted_scores = {}
     for emotion in text_classification:
-        if(i==l-1):
+        if(i==l):
             if(emotion['label']=='gratitude'):
-                weighted_scores[emotion['label']] = emotion['score'] * 0.4
+                print(i)
+                weighted_scores[emotion['label']] = emotion['score'] * 0.2
             else:
                 weighted_scores[emotion['label']] = emotion['score'] * emotion_weights.get(emotion['label'], 0.0)
         else:
             weighted_scores[emotion['label']] = emotion['score'] * emotion_weights.get(emotion['label'], 0.0)
 
-    combined_result = speech_score + 2.5*sum(weighted_scores.values())
+    combined_result = speech_score + 2.2*sum(weighted_scores.values())
     return combined_result,sum(weighted_scores.values())
 
 def code_to_language_name(language_code):
@@ -251,6 +252,8 @@ def normalize_data(data):
     return normalized_data
 
 def dHexagonAnalysis(audio_path):
+    audio_features, duration = process_audio(audio_path)
+
 
     model = whisper.load_model("base")
     audio = whisper.load_audio(audio_path)
@@ -261,7 +264,7 @@ def dHexagonAnalysis(audio_path):
     language_code=max(probs, key=probs.get)
     language_name = code_to_language_name(language_code)
 
-    audio_features,duration = process_audio(audio_path)
+
     results = []
     textResults=[]
     emotions=[]
@@ -319,7 +322,7 @@ def dHexagonAnalysis(audio_path):
         text_classification,service_issue = classify_mood(text,emotions,emotion_weights)
         service_issue_total+=service_issue
         os.remove(temp_filename)
-        combined_result,text_result = combine_results(speech_score, text_classification, emotion_weights,j,len(audio_features))
+        combined_result,text_result = combine_results(speech_score, text_classification, emotion_weights,i,duration/15)
         textResults.append(text_result)
         results.append(combined_result)
         i=i+1
@@ -347,7 +350,12 @@ def dHexagonAnalysis(audio_path):
     os.remove(temp_filename)
     potential_issues.append(issue_first20)
     transcript = audio_to_text(audio_path)
-    # from transformers import pipeline
+    classifier = pipeline(task="text-classification", model="SamLowe/roberta-base-go_emotions", top_k=None)
+    input = [transcript]
+    model_outputs = classifier(input)
+    print(emotions)
+    emotions=model_outputs[0][0:5]
+    # from transformers import pipel ine
     # summarizer = pipeline("summarization", model="Falconsai/text_summarization")
     # summary=summarizer(transcript, max_length=45, min_length=7, do_sample=False)
     # print(f"summary:{summary}")
@@ -372,16 +380,19 @@ def dHexagonAnalysis(audio_path):
         if (normalized_combined_results[k] > normalized_combined_results[k-1] ) :
             pos_rating_var += (normalized_combined_results[k]-normalized_combined_results[k-1])
         elif (normalized_combined_results[k] < normalized_combined_results[k-1]):
-            neg_rating_var += (normalized_combined_results[k] - normalized_combined_results[k - 1])
+            neg_rating_var += (-normalized_combined_results[k] + normalized_combined_results[k - 1])
 
     if(len(normalized_combined_results)<=1):
         pos_percentage = 50 + textResults[0]*50
         neg_percentage = 100-pos_percentage
         rating_var = (textResults[0]+1)*2.5
     else:
-        rating_var = ((((1.0 + pos_rating_var ** 2.0 - neg_rating_var ** 2.0) * 12.5) ** 0.5))
-        pos_percentage = (pos_rating_var * 5 / (pos_rating_var - neg_rating_var)) * 20
-        neg_percentage = (neg_rating_var * -5 / (pos_rating_var - neg_rating_var)) * 20
+        if(pos_rating_var>=neg_rating_var):
+            rating_var = ((((1.0 + (pos_rating_var - neg_rating_var) ** 2.0) * 12.5) ** 0.5))
+        else:
+            rating_var = ((((1.0 - (pos_rating_var - neg_rating_var) ** 2.0) * 12.5) ** 0.5))
+        pos_percentage = (pos_rating_var * 5 / (pos_rating_var + neg_rating_var)) * 20
+        neg_percentage = (neg_rating_var * -5 / (pos_rating_var + neg_rating_var)) * 20
 
     print((1-(service_issue_percent)/3))
     rating_var*= (1-(service_issue_percent)/3)
@@ -404,5 +415,29 @@ def dHexagonAnalysis(audio_path):
                           emotions_audio)
     return model_result
 
+def spam_detection(audio_path):
+    audio_features, duration = process_audio(audio_path)
+    if(duration<=15):
+        loaded_model = TFBertForSequenceClassification.from_pretrained('spam_detect', num_labels=2)
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        class_list = ["not spam", "spam"]
+        model = whisper.load_model("base")
+        text = model.transcribe(audio_path, language="en")
+
+        new_texts = [text['text']]
+        new_tokenized_inputs = tokenizer(new_texts, padding=True, truncation=True, return_tensors='tf')
+        predictions = loaded_model.predict(dict(new_tokenized_inputs))
+        probabilities = tf.nn.softmax(predictions.logits, axis=-1)
+        predicted_classes = tf.argmax(probabilities, axis=-1).numpy()
+        i = predicted_classes[0]
+        result = class_list[i]
+
+        if (result == "spam"):
+            return "spam"
+        else:
+            return "not spam"
+
+    else:
+        return  dHexagonAnalysis(audio_path)
 
 
